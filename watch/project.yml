@@ -73,9 +73,10 @@ targets:
         INFOPLIST_KEY_NSHealthShareUsageDescription: "Collar 读取心率与睡眠,同步到你自己的服务器。"
         # 与上方 info.properties 保持同句(文案质量审查见上方注释)
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: "Collar 在测量心率时需要记录体能训练会话数据。"
+        # 健康推送 token 由 CI 构建时注入（INFOPLIST_KEY 机制写入生成 plist）
+        INFOPLIST_KEY_WATCH_HEALTH_TOKEN: $(WATCH_HEALTH_TOKEN)
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
-        # 健康推送 token 由 CI 构建时注入（Info.plist 的 $(WATCH_HEALTH_TOKEN)）
         WATCH_HEALTH_TOKEN: ""
   CollarWidget:
     type: app-extension
