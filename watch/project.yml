@@ -60,6 +60,10 @@ targets:
         # 占位敷衍文案(如旧句"仅测试环境写入模拟数据。")会在请求写权限时被判
         # invalid 直接闪退(NSInvalidArgumentException)。别写敷衍话。
         NSHealthUpdateUsageDescription: "Collar 在测量心率时需要记录体能训练会话数据。"
+        # 健康推送 token 由 CI 构建时经 $(WATCH_HEALTH_TOKEN) 注入。
+        # 必须放 info.properties：产物 plist 是 xcodegen properties 生成的，
+        # Sources/Info.plist 的手写键和 INFOPLIST_KEY_* 自定义键都不进产物。
+        WATCH_HEALTH_TOKEN: $(WATCH_HEALTH_TOKEN)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chestnuts.collarwatch.watch
@@ -74,7 +78,6 @@ targets:
         # 与上方 info.properties 保持同句(文案质量审查见上方注释)
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: "Collar 在测量心率时需要记录体能训练会话数据。"
         # 健康推送 token 由 CI 构建时注入（INFOPLIST_KEY 机制写入生成 plist）
-        INFOPLIST_KEY_WATCH_HEALTH_TOKEN: $(WATCH_HEALTH_TOKEN)
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
         WATCH_HEALTH_TOKEN: ""
