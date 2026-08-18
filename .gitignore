@@ -1,0 +1,21 @@
+# 敏感/垃圾：绝不进仓库
+.pat_tmp
+.new_watch_token
+_b64_*.txt
+*.mobileprovision
+*.p12
+*.py
+*.zip
+*.log
+*.txt
+*.json
+*.cpp
+*.go
+*.db
+ci-signing/
+_shell_work/
+edge_profile/
+bldlogs/
+build/
+*.ipa
+*.png

@@ -1,0 +1,99 @@
+# CollarWatch — 配对三件套：iOS 壳 + watch app + 表盘 widget
+# 生成: xcodegen generate
+name: CollarWatch
+options:
+  deploymentTarget:
+    iOS: "18.0"
+    watchOS: "10.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    DEVELOPMENT_TEAM: 2ZSUTQ62K8
+    CODE_SIGN_STYLE: Automatic
+targets:
+  CollarShell:
+    type: application
+    platform: iOS
+    sources:
+      - path: Shell
+    dependencies:
+      - target: CollarWatch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chestnuts.collarwatch
+        CODE_SIGN_STYLE: Manual
+        PROVISIONING_PROFILE_SPECIFIER: d7c37e2b-f3f8-44e5-900e-18e617dc1485
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: XuYu健康
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+        TARGETED_DEVICE_FAMILY: 1
+  CollarWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: Sources
+    dependencies:
+      - target: CollarWidget
+    entitlements:
+      path: Sources/CollarWatch.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+    info:
+      path: Sources/Info.plist
+      properties:
+        WKApplication: true
+        # paired 模式：无 WKWatchOnly，companion 指向 iOS 壳
+        WKCompanionAppBundleIdentifier: com.chestnuts.collarwatch
+        UIDeviceFamily:
+          - 4
+        DTPlatformName: watchos
+        CFBundleSupportedPlatforms:
+          - WatchOS
+        # 实时测量中佩戴者放下手腕屏幕熄灭,workout session 靠这个跑完
+        WKBackgroundModes:
+          - workout-processing
+        # 直写模板,不走 INFOPLIST_KEY 注入:healthd 侧校验对注入机制有过冤案
+        NSHealthShareUsageDescription: "Collar 读取心率与睡眠,同步到你自己的服务器。"
+        # ⚠️ 这句必须是正经的用户向描述。HealthKit 会在运行时审查文案质量,
+        # 占位敷衍文案(如旧句"仅测试环境写入模拟数据。")会在请求写权限时被判
+        # invalid 直接闪退(NSInvalidArgumentException)。别写敷衍话。
+        NSHealthUpdateUsageDescription: "Collar 在测量心率时需要记录体能训练会话数据。"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chestnuts.collarwatch.watch
+        # paired 模式：watch 由 Xcode 嵌入 iOS 壳的 Watch/ 目录（SKIP_INSTALL 默认 YES）
+        SKIP_INSTALL: YES
+        CODE_SIGN_STYLE: Manual
+        PROVISIONING_PROFILE_SPECIFIER: 05be3282-2c79-4c72-b64f-e5c19befde84
+        GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_CFBundleDisplayName: XuYu健康
+        INFOPLIST_KEY_NSHealthShareUsageDescription: "Collar 读取心率与睡眠,同步到你自己的服务器。"
+        # 与上方 info.properties 保持同句(文案质量审查见上方注释)
+        INFOPLIST_KEY_NSHealthUpdateUsageDescription: "Collar 在测量心率时需要记录体能训练会话数据。"
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+        # 健康推送 token 由 CI 构建时注入（Info.plist 的 $(WATCH_HEALTH_TOKEN)）
+        WATCH_HEALTH_TOKEN: ""
+  CollarWidget:
+    type: app-extension
+    platform: watchOS
+    sources:
+      - path: Widget
+    info:
+      path: Widget/Info.plist
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chestnuts.collarwatch.watch.widget
+        CODE_SIGN_STYLE: Manual
+        PROVISIONING_PROFILE_SPECIFIER: cbfdc189-9c50-4836-b619-89c3c526cb4e
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: XuYu健康
+        SKIP_INSTALL: YES
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0

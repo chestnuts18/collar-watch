@@ -1,0 +1,100 @@
+name: WatchAdHoc
+permissions:
+  contents: write
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        working-directory: watch
+        run: xcodegen generate
+
+      - name: Install signing materials (manual signing)
+        run: |
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "${{ secrets.APPLE_P12_B64 }}" | base64 -d -i - -o dist.p12
+          echo "${{ secrets.SHELL_PROFILE_B64 }}" | base64 -d -i - -o "$HOME/Library/MobileDevice/Provisioning Profiles/d7c37e2b-f3f8-44e5-900e-18e617dc1485.mobileprovision"
+          echo "${{ secrets.WATCH_ADHOC_PROFILE_B64 }}" | base64 -d -i - -o "$HOME/Library/MobileDevice/Provisioning Profiles/05be3282-2c79-4c72-b64f-e5c19befde84.mobileprovision"
+          echo "${{ secrets.WIDGET_ADHOC_PROFILE_B64 }}" | base64 -d -i - -o "$HOME/Library/MobileDevice/Provisioning Profiles/cbfdc189-9c50-4836-b619-89c3c526cb4e.mobileprovision"
+          security create-keychain -p ci ci.keychain
+          security import dist.p12 -k ci.keychain -P "${{ secrets.P12_PASSWORD }}" -A
+          security list-keychains -s ci.keychain
+          security unlock-keychain -p ci ci.keychain
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci ci.keychain
+          security find-identity -v -p codesigning
+
+      - name: Archive (paired, iOS destination)
+        working-directory: watch
+        run: |
+          xcodebuild archive \
+            -project CollarWatch.xcodeproj \
+            -scheme CollarShell \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/CollarWatch \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            DEVELOPMENT_TEAM=2ZSUTQ62K8 \
+            WATCH_HEALTH_TOKEN="${{ secrets.WATCH_HEALTH_TOKEN }}"
+
+      - name: Diagnose archive
+        working-directory: watch
+        run: |
+          echo "=== Products ==="
+          find build/CollarWatch.xcarchive/Products/Applications -maxdepth 4 -name '*.app' -o -maxdepth 4 -name '*.appex' | head -10
+          echo "=== shell signature ==="
+          codesign -dv build/CollarWatch.xcarchive/Products/Applications/CollarShell.app 2>&1 | head -6
+          echo "=== watch signature ==="
+          codesign -dv "build/CollarWatch.xcarchive/Products/Applications/CollarShell.app/Watch/CollarWatch.app" 2>&1 | head -6
+          echo "=== widget signature ==="
+          codesign -dv "build/CollarWatch.xcarchive/Products/Applications/CollarShell.app/Watch/CollarWatch.app/PlugIns/CollarWidget.appex" 2>&1 | head -6
+
+      - name: Export Ad Hoc
+        working-directory: watch
+        run: |
+          cat > export.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>ad-hoc</string>
+              <key>destination</key>
+              <string>export</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>signingCertificate</key>
+              <string>Apple Distribution</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>com.chestnuts.collarwatch</key>
+                  <string>d7c37e2b-f3f8-44e5-900e-18e617dc1485</string>
+                  <key>com.chestnuts.collarwatch.watch</key>
+                  <string>05be3282-2c79-4c72-b64f-e5c19befde84</string>
+                  <key>com.chestnuts.collarwatch.watch.widget</key>
+                  <string>cbfdc189-9c50-4836-b619-89c3c526cb4e</string>
+              </dict>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath build/CollarWatch.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist export.plist
+          ls -la build/export/
+
+      - name: Upload Ad Hoc ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CollarWatch-adhoc-ipa
+          path: watch/build/export/*.ipa
+          retention-days: 30
