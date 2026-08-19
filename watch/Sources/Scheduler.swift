@@ -35,14 +35,15 @@ enum Scheduler {
     // 一个完整采集上报周期:点测类增量 + 睡眠全量聚合,合批发送。
     // 进门先查指令;无指令→零动作,照旧采集上报。
     //
-    // 超时兜底(2026-08-19):后台任务窗口只有几秒,HK 查询可能被系统挂起不回,
+    // 超时兜底(2026-08-20 收缩):后台任务窗口只有几秒,HK 查询可能被系统挂起不回,
     // 串行链任何一环卡死都会让 POST 发不出去(18:37-20:00「有 GET 无 POST」案)。
-    // collect 30s / sleep 20s 竞速,超时放弃该环但不挡上传与收尾。
+    // collect 12s / sleep 10s 竞速,超时放弃该环但不挡上传与收尾——
+    // 旧 30s/20s/90s 超出窗口,任务未完成被系统停投(08-19 停投 5h 案)。
     static var lastCycleStart = Date.distantPast
 
     static func runCycle(foreground: Bool = true) async {
         // 防叠加:5 分钟内刚启动过 → 上一周期可能冻结未死(窗口耗尽被挂起),
-        // 别叠新周期;旧周期恢复后自行收尾,或由 handle 的 90s 兜底收割。
+        // 别叠新周期;旧周期恢复后自行收尾,或由 handle 的 24s 兜底收割。
         let since = Date().timeIntervalSince(lastCycleStart)
         if since < 300 {
             WatchLog.log("runCycle skip (prev in flight \(Int(since))s)")
@@ -57,7 +58,7 @@ enum Scheduler {
 
         var samples: [Sample] = []
         var anchors: [String: Data] = [:]
-        if let r = await withTimeout(30, { await HealthCollector.shared.collect() }) {
+        if let r = await withTimeout(12, { await HealthCollector.shared.collect() }) {
             (samples, anchors) = (r.0, r.1)
             WatchLog.log("collect done n=\(samples.count) \(ms())ms")
         } else {
@@ -66,7 +67,7 @@ enum Scheduler {
         }
 
         let sleep: [Sample]
-        if let r = await withTimeout(20, { await SleepAggregator.collect(store: HealthCollector.shared.store) }) {
+        if let r = await withTimeout(10, { await SleepAggregator.collect(store: HealthCollector.shared.store) }) {
             sleep = r
             WatchLog.log("sleep done n=\(sleep.count) \(ms())ms")
         } else {
@@ -90,9 +91,22 @@ enum Scheduler {
     }
 }
 
+// 后台任务完成器:setTaskCompletedWithSnapshot 只能喊一次(2026-08-20)。
+final class TaskCompleter {
+    private var done = false
+    private let lock = NSLock()
+    func complete(_ task: WKRefreshBackgroundTask) {
+        lock.lock(); defer { lock.unlock() }
+        guard !done else { return }
+        done = true
+        task.setTaskCompletedWithSnapshot(false)
+    }
+}
+
 final class ExtensionDelegate: NSObject, WKApplicationDelegate {
     func applicationDidFinishLaunching() {
         Scheduler.scheduleNext()   // 前台启动重建链,后台链断掉时的自愈入口
+        BackgroundDelivery.shared.start()  // HK 后台投递:数据变化即唤醒(2026-08-20)
         // 本地通知授权(后台撞见指令时提醒佩戴者,点通知直接进 app)
         UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -105,12 +119,17 @@ final class ExtensionDelegate: NSObject, WKApplicationDelegate {
                 Scheduler.scheduleNext()
                 Status.shared.noteBackgroundWake(Date())   // 真机验收定时链的观测点
                 WatchLog.log("bg wake refresh")
+                // 独立兜底(2026-08-20):24s 必喊完成,不押在 runCycle 链尾——
+                // 任务未完成系统会停投后续唤醒(08-19 停投 5h 案),进程活着就必须完成。
+                let completer = TaskCompleter()
+                DispatchQueue.global().asyncAfter(deadline: .now() + 24) {
+                    WatchLog.log("bg task forced completed")
+                    completer.complete(refresh)
+                }
                 Task {
-                    // 兜底:runCycle 无论如何 90s 内收场,任务必完成——
-                    // 任务不完成系统会停投后续唤醒,整条链就死了
-                    await withTimeout(90) { await Scheduler.runCycle(foreground: false) }
+                    await withTimeout(24) { await Scheduler.runCycle(foreground: false) }
                     WatchLog.log("bg task completed")
-                    refresh.setTaskCompletedWithSnapshot(false)
+                    completer.complete(refresh)
                 }
             case let urlTask as WKURLSessionRefreshBackgroundTask:
                 Uploader.shared.pendingSessionTask = {

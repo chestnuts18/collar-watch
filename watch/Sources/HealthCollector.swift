@@ -31,6 +31,9 @@ final class HealthCollector {
         (.heartRateVariabilitySDNN, "heart_rate_variability", .secondUnit(with: .milli), "ms"),
         (.restingHeartRate, "resting_heart_rate", HKUnit(from: "count/min"), "count/min"),
         (.respiratoryRate, "respiratory_rate", HKUnit(from: "count/min"), "count/min"),
+        // 血氧:HK 只有手动测量记录(血氧 app 测 30 秒),后台不能主动测。
+        // 首次 anchor=nil 会全量补历史手动记录,之后增量。type 名用 spo2 对齐服务端。
+        (.oxygenSaturation, "spo2", .percent(), "percent"),
         // 腕温:SE3 睡眠期采集,每晚一两条。命名与 HAE 同款,两源自动合流。
         (.appleSleepingWristTemperature, "apple_sleeping_wrist_temperature", .degreeCelsius(), "degC"),
         // 累计类(今日总量=服务端 sum 当天样本)。只有手表账,不戴表时段会缺。
@@ -41,11 +44,13 @@ final class HealthCollector {
         (.appleExerciseTime, "apple_exercise_time", .minute(), "min"),
     ]
 
-    var readTypes: Set<HKObjectType> {
-        var t = Set(quantityTypes.compactMap { HKObjectType.quantityType(forIdentifier: $0.0) as HKObjectType? })
-        t.insert(HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!)
+    var deliveryObjectTypes: [HKObjectType] {
+        var t = quantityTypes.compactMap { HKObjectType.quantityType(forIdentifier: $0.0) as HKObjectType? }
+        t.append(HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!)
         return t
     }
+
+    var readTypes: Set<HKObjectType> { Set(deliveryObjectTypes) }
 
     func requestAuthorization() async throws {
         // workout 写权限是 HKLiveWorkoutBuilder.beginCollection 的门票(实时测量用)
@@ -115,9 +120,10 @@ final class HealthCollector {
                 finish(.success((rows ?? [], newAnchor)))
             }
             store.execute(q)
-            // 兜底(2026-08-19):后台被系统挂起时查询可能不回,30s 强制收尾,
+            // 兜底(2026-08-20):后台被系统挂起时查询可能不回,7s 强制收尾,
             // 防止 continuation 永久泄漏 + runCycle 卡死。resumed 标志防双重 resume。
-            DispatchQueue.global().asyncAfter(deadline: .now() + 30) {
+            // 旧 30s 超出后台任务窗口,任务未完成会被系统停投唤醒(08-19 停投 5h 案)。
+            DispatchQueue.global().asyncAfter(deadline: .now() + 7) {
                 WatchLog.log("hk query \(name) timeout, forced finish")
                 finish(.failure(CancellationError()))
             }
