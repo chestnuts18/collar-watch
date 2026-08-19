@@ -41,6 +41,9 @@ targets:
       path: Sources/CollarWatch.entitlements
       properties:
         com.apple.developer.healthkit: true
+        # HK 后台投递:新样本落库即唤醒(2026-08-20)。profile 侧已含此权限,
+        # 工程侧必须申请才会进签名产物(产物 entitlements = 申请 ∩ profile)。
+        com.apple.developer.healthkit.background-delivery: true
     info:
       path: Sources/Info.plist
       properties:
