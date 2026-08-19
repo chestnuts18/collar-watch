@@ -44,13 +44,15 @@ final class HealthCollector {
         (.appleExerciseTime, "apple_exercise_time", .minute(), "min"),
     ]
 
-    var deliveryObjectTypes: [HKObjectType] {
-        var t = quantityTypes.compactMap { HKObjectType.quantityType(forIdentifier: $0.0) as HKObjectType? }
+    var deliverySampleTypes: [HKSampleType] {
+        var t: [HKSampleType] = quantityTypes.compactMap {
+            HKObjectType.quantityType(forIdentifier: $0.0) as HKSampleType?
+        }
         t.append(HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!)
         return t
     }
 
-    var readTypes: Set<HKObjectType> { Set(deliveryObjectTypes) }
+    var readTypes: Set<HKObjectType> { Set(deliverySampleTypes.map { $0 as HKObjectType }) }
 
     func requestAuthorization() async throws {
         // workout 写权限是 HKLiveWorkoutBuilder.beginCollection 的门票(实时测量用)

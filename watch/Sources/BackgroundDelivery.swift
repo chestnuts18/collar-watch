@@ -12,7 +12,7 @@ final class BackgroundDelivery {
     func start() {
         guard !started else { return }
         started = true
-        for type in HealthCollector.shared.deliveryObjectTypes {
+        for type in HealthCollector.shared.deliverySampleTypes {
             let q = HKObserverQuery(sampleType: type, predicate: nil) { _, completion, error in
                 if let error {
                     WatchLog.log("delivery err \(type.identifier): \(error.localizedDescription)")
