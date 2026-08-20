@@ -24,7 +24,7 @@ jobs:
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           echo "${{ secrets.APPLE_P12_B64 }}" | base64 -d -i - -o dist.p12
           echo "${{ secrets.SHELL_PROFILE_B64 }}" | base64 -d -i - -o "$HOME/Library/MobileDevice/Provisioning Profiles/d7c37e2b-f3f8-44e5-900e-18e617dc1485.mobileprovision"
-          echo "${{ secrets.WATCH_ADHOC_PROFILE_B64 }}" | base64 -d -i - -o "$HOME/Library/MobileDevice/Provisioning Profiles/05be3282-2c79-4c72-b64f-e5c19befde84.mobileprovision"
+          echo "${{ secrets.WATCH_ADHOC_PROFILE_B64 }}" | base64 -d -i - -o "$HOME/Library/MobileDevice/Provisioning Profiles/1b4b49bb-5a9b-42d2-9e59-817d1474bb28.mobileprovision"
           echo "${{ secrets.WIDGET_ADHOC_PROFILE_B64 }}" | base64 -d -i - -o "$HOME/Library/MobileDevice/Provisioning Profiles/cbfdc189-9c50-4836-b619-89c3c526cb4e.mobileprovision"
           security create-keychain -p ci ci.keychain
           security import dist.p12 -k ci.keychain -P "${{ secrets.P12_PASSWORD }}" -A
@@ -79,7 +79,7 @@ jobs:
                   <key>com.chestnuts.collarwatch</key>
                   <string>d7c37e2b-f3f8-44e5-900e-18e617dc1485</string>
                   <key>com.chestnuts.collarwatch.watch</key>
-                  <string>05be3282-2c79-4c72-b64f-e5c19befde84</string>
+                  <string>1b4b49bb-5a9b-42d2-9e59-817d1474bb28</string>
                   <key>com.chestnuts.collarwatch.watch.widget</key>
                   <string>cbfdc189-9c50-4836-b619-89c3c526cb4e</string>
               </dict>
@@ -98,3 +98,12 @@ jobs:
           name: CollarWatch-adhoc-ipa
           path: watch/build/export/*.ipa
           retention-days: 30
+
+      - name: Publish to release ci-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ci-latest --yes || true
+          gh release create ci-latest watch/build/export/*.ipa \
+            --title "CollarWatch Ad Hoc ci-latest" \
+            --notes "自动构建 ${{ github.sha }}"
