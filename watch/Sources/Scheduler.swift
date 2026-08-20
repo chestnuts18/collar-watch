@@ -105,16 +105,28 @@ final class TaskCompleter {
     }
 }
 
-final class ExtensionDelegate: NSObject, WKApplicationDelegate {
+final class ExtensionDelegate: NSObject, WKApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching() {
         Scheduler.scheduleNext()   // 前台启动重建链,后台链断掉时的自愈入口
         BackgroundDelivery.shared.start()  // HK 后台投递:数据变化即唤醒(2026-08-20)
         // APNs 静默心跳(2026-08-21 作者路线):注册拿 token,服务器每 15 分钟
         // 发一条静默推送免点击拉起跑一轮上传;token 随每次上传带回服务器
         WKApplication.shared().registerForRemoteNotifications()
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        // 通知权限状态留痕(2026-08-21 排查:授权框从未弹过,状态全靠日志定位)
+        center.getNotificationSettings { s in
+            WatchLog.log("notif status at launch \(s.authorizationStatus.rawValue)")
+        }
         // 本地通知授权(后台撞见指令时提醒佩戴者,点通知直接进 app)
-        UNUserNotificationCenter.current()
-            .requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    // 前台也显示横幅(2026-08-21):没有这个回调,app 在前台时推送横幅被吞
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
     }
 
     func didRegisterForRemoteNotifications(withDeviceToken deviceToken: Data) {

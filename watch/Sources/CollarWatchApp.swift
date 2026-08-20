@@ -1,5 +1,6 @@
 import SwiftUI
 import HealthKit
+import UserNotifications
 
 @main
 struct CollarWatchApp: App {
@@ -27,6 +28,7 @@ final class Status: ObservableObject {
     @Published var lastFailure: String?
     @Published var lastBackgroundWake: Date?
     @Published var authorized = false
+    @Published var notifAuthorized: Bool?   // nil=未知;true=已授权(含 provisional);false=被拒
 
     private init() {
         let ud = UserDefaults.standard
@@ -73,6 +75,14 @@ struct StatusView: View {
     @StateObject private var status = Status.shared
     @StateObject private var measurer = WorkoutMeasurer.shared
     @State private var busy = false
+
+    private var notifLabel: String {
+        switch status.notifAuthorized {
+        case .some(true): return "通知已授权 ✓"
+        case .some(false): return "通知未授权 ✗ 重试"
+        case .none: return "通知授权"
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -147,6 +157,25 @@ struct StatusView: View {
                         } catch {
                             status.note(failure: -1, message: error.localizedDescription)
                         }
+                    }
+                }
+                .font(.footnote)
+
+                // 通知授权(2026-08-21 排查):启动流程里的授权请求从未弹过框,
+                // 改成用户主动点按请求;系统仍不弹就退 provisional 免弹授权
+                Button(notifLabel) {
+                    Task {
+                        let center = UNUserNotificationCenter.current()
+                        _ = try? await center.requestAuthorization(options: [.alert, .sound])
+                        var s = await center.notificationSettings()
+                        WatchLog.log("notif auth status=\(s.authorizationStatus.rawValue)")
+                        if s.authorizationStatus == .notDetermined {
+                            _ = try? await center.requestAuthorization(options: [.provisional])
+                            s = await center.notificationSettings()
+                            WatchLog.log("notif provisional status=\(s.authorizationStatus.rawValue)")
+                        }
+                        status.notifAuthorized = (s.authorizationStatus == .authorized
+                                                  || s.authorizationStatus == .provisional)
                     }
                 }
                 .font(.footnote)
