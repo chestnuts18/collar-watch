@@ -111,7 +111,7 @@ final class WorkoutMeasurer: NSObject, ObservableObject,
     // 睡眠记录走独立 SleepAggregator 不受代码影响;discardWorkout 不写训练记录,
     // 但"在运动"是否影响系统睡眠判定需实机验证(30min→2h→整夜三段式)。
     // watchOS 不允许后台启动 workout session,必须佩戴者睡前手动点一下开关。
-    func startNightWatch(hours: Double = 8) {
+    func startNightWatch(hours: Double = 10) {
         guard !measuring, !nightWatchOn else { return }
         nightTearDown = false
         let cfg = HKWorkoutConfiguration()
