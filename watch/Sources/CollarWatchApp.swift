@@ -125,6 +125,20 @@ struct StatusView: View {
                 }
                 .disabled(busy)
 
+                // 守夜模式(2026-08-20):睡前手动开启,长 workout session 换持续后台
+                // 运行权,每 15 分钟主动上传。再点一次停止。
+                Button(measurer.nightWatchOn ? "守夜中 · 点按停止" : "开启守夜模式") {
+                    if measurer.nightWatchOn {
+                        measurer.stopNightWatch()
+                    } else {
+                        measurer.startNightWatch()
+                    }
+                }
+                if measurer.nightWatchOn, let end = measurer.nightWatchEndAt {
+                    Text("守夜至 \(end.formatted(date: .omitted, time: .shortened))")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+
                 Button(status.authorized ? "已请求授权 ✓" : "健康数据授权") {
                     Task {
                         do {

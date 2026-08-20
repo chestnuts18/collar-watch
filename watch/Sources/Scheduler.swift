@@ -41,7 +41,7 @@ enum Scheduler {
     // 旧 30s/20s/90s 超出窗口,任务未完成被系统停投(08-19 停投 5h 案)。
     static var lastCycleStart = Date.distantPast
 
-    static func runCycle(foreground: Bool = true) async {
+    static func runCycle(foreground: Bool = true, skipCommand: Bool = false) async {
         // 防叠加:5 分钟内刚启动过 → 上一周期可能冻结未死(窗口耗尽被挂起),
         // 别叠新周期;旧周期恢复后自行收尾,或由 handle 的 24s 兜底收割。
         let since = Date().timeIntervalSince(lastCycleStart)
@@ -54,7 +54,9 @@ enum Scheduler {
         func ms() -> Int { Int(Date().timeIntervalSince(t0) * 1000) }
         WatchLog.log("runCycle begin fg=\(foreground)")
 
-        await checkCommand(foreground: foreground)
+        if !skipCommand {
+            await checkCommand(foreground: foreground)
+        }
 
         var samples: [Sample] = []
         var anchors: [String: Data] = [:]

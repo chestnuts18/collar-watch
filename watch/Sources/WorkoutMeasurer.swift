@@ -14,15 +14,22 @@ final class WorkoutMeasurer: NSObject, ObservableObject,
     @Published var measuring = false
     @Published var currentHeartRate: Double = 0
     @Published var secondsLeft: Int = 0
+    @Published var nightWatchOn = false
+    @Published var nightWatchEndAt: Date?
 
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
     private var readings: [Double] = []
     private var commandID = ""
     private var duration = 30
+    // 守夜模式(2026-08-20)
+    private var nightEnd: Date = .distantPast
+    private var nightTearDown = false
+    private let nightInterval: TimeInterval = 15 * 60
+    private let batteryFloor: Float = 0.2
 
     func start(commandID: String, duration: Int = 30) {
-        guard !measuring else { return }
+        guard !measuring, !nightWatchOn else { return }
         self.commandID = commandID
         self.duration = max(10, min(duration, 300))   // 服务端下发,10-300s 夹紧
         readings = []
@@ -98,6 +105,88 @@ final class WorkoutMeasurer: NSObject, ObservableObject,
         builder = nil
     }
 
+    // MARK: - 守夜模式（2026-08-20）
+    // 长 workout session 换持续后台运行权,绕开 watchOS 26 background delivery 停投。
+    // session 期间每 15 分钟主动上传一轮,不依赖系统唤醒预算。
+    // 睡眠记录走独立 SleepAggregator 不受代码影响;discardWorkout 不写训练记录,
+    // 但"在运动"是否影响系统睡眠判定需实机验证(30min→2h→整夜三段式)。
+    // watchOS 不允许后台启动 workout session,必须佩戴者睡前手动点一下开关。
+    func startNightWatch(hours: Double = 8) {
+        guard !measuring, !nightWatchOn else { return }
+        nightTearDown = false
+        let cfg = HKWorkoutConfiguration()
+        cfg.activityType = .other
+        cfg.locationType = .indoor
+        let store = HealthCollector.shared.store
+        do {
+            let s = try HKWorkoutSession(healthStore: store, configuration: cfg)
+            let b = s.associatedWorkoutBuilder()
+            b.dataSource = HKLiveWorkoutDataSource(healthStore: store,
+                                                   workoutConfiguration: cfg)
+            s.delegate = self
+            b.delegate = self
+            session = s
+            builder = b
+            nightEnd = Date().addingTimeInterval(hours * 3600)
+            DispatchQueue.main.async {
+                self.nightWatchOn = true
+                self.nightWatchEndAt = self.nightEnd
+            }
+            s.startActivity(with: Date())
+            b.beginCollection(withStart: Date()) { _, _ in }
+            WatchLog.log("night watch start hours=\(hours)")
+            Task { await self.nightLoop() }
+        } catch {
+            Status.shared.note(failure: -1, message: "night watch: \(error.localizedDescription)")
+        }
+    }
+
+    func stopNightWatch() {
+        guard nightWatchOn else { return }
+        nightEnd = .distantPast   // 让循环尽快退出并收尾
+        WatchLog.log("night watch stop requested")
+    }
+
+    private func nightLoop() async {
+        var nextUpload = Date().addingTimeInterval(nightInterval)
+        while nightWatchOn && Date() < nightEnd {
+            let battery = WKInterfaceDevice.current().batteryLevel
+            if battery >= 0 && battery < batteryFloor {
+                WatchLog.log("night watch battery low \(Int(battery * 100))% — auto stop")
+                break
+            }
+            if Date() >= nextUpload {
+                WatchLog.log("night watch cycle upload")
+                await Scheduler.runCycle(foreground: false, skipCommand: true)
+                nextUpload = Date().addingTimeInterval(nightInterval)
+            }
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+        }
+        await endNightWatch()
+    }
+
+    private func endNightWatch() async {
+        guard !nightTearDown else { return }
+        nightTearDown = true
+        await MainActor.run {
+            self.nightWatchOn = false
+            self.nightWatchEndAt = nil
+        }
+        session?.end()
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            guard let b = builder else { cont.resume(); return }
+            b.endCollection(withEnd: Date()) { _, _ in
+                b.discardWorkout()   // 不保存训练记录,三环零污染
+                cont.resume()
+            }
+        }
+        session = nil
+        builder = nil
+        // 收尾再传一轮,把最后一段数据带上
+        await Scheduler.runCycle(foreground: false, skipCommand: true)
+        WatchLog.log("night watch end")
+    }
+
     // MARK: - HKLiveWorkoutBuilderDelegate
     func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder,
                         didCollectDataOf collectedTypes: Set<HKSampleType>) {
@@ -106,7 +195,8 @@ final class WorkoutMeasurer: NSObject, ObservableObject,
               let stats = workoutBuilder.statistics(for: hrType),
               let q = stats.mostRecentQuantity() else { return }
         let bpm = q.doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
-        readings.append(bpm)
+        // 守夜模式整夜采样不囤 readings(防内存增长),只刷 UI
+        if measuring { readings.append(bpm) }
         DispatchQueue.main.async { self.currentHeartRate = bpm }
     }
 
@@ -119,9 +209,14 @@ final class WorkoutMeasurer: NSObject, ObservableObject,
 
     func workoutSession(_ workoutSession: HKWorkoutSession,
                         didFailWithError error: Error) {
-        // 门:只有测量进行中的真失败才亮红字;收尾/完成后的杂音一律静音
-        guard measuring else { return }
+        // 门:只有测量/守夜进行中的真失败才亮红字;收尾/完成后的杂音一律静音
+        guard measuring || nightWatchOn else { return }
+        WatchLog.log("workout fail: \(error.localizedDescription)")
         Status.shared.note(failure: -1, message: "workout: \(error.localizedDescription)")
         DispatchQueue.main.async { self.measuring = false }
+        if nightWatchOn {
+            nightEnd = .distantPast
+            Task { await self.endNightWatch() }
+        }
     }
 }

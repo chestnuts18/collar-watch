@@ -20,9 +20,20 @@ final class BackgroundDelivery {
                     return
                 }
                 WatchLog.log("bg delivery wake \(type.identifier)")
+                // completion 不能押在 runCycle 链尾(内含 sendSync 同步 POST,最坏 37s):
+                // Apple 文档明确 completion 不回 → 系统停止/暂停后台投递。
+                // 20s 独立强制兜底 + 线程安全单次调用(2026-08-20 加,对齐 TaskCompleter)。
+                let guard_ = CompletionGuard()
+                DispatchQueue.global().asyncAfter(deadline: .now() + 20) {
+                    if guard_.run(completion) {
+                        WatchLog.log("observer completion forced \(type.identifier)")
+                    }
+                }
                 Task {
                     await Scheduler.runCycle(foreground: false)
-                    completion()
+                    if guard_.run(completion) {
+                        WatchLog.log("observer completion after cycle \(type.identifier)")
+                    }
                 }
             }
             store.execute(q)
@@ -31,5 +42,19 @@ final class BackgroundDelivery {
                              (error.map { " err=\($0.localizedDescription)" } ?? ""))
             }
         }
+    }
+}
+
+// observer completion 守卫:线程安全、只执行一次。
+// run() 返回本次是否真的执行了(供日志区分"正常收尾/强制兜底")。
+final class CompletionGuard {
+    private var done = false
+    private let lock = NSLock()
+    func run(_ completion: @escaping () -> Void) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !done else { return false }
+        done = true
+        completion()
+        return true
     }
 }
