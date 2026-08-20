@@ -6,5 +6,8 @@
 	<true/>
 	<key>com.apple.developer.healthkit.background-delivery</key>
 	<true/>
+	<!-- APNs 静默心跳(2026-08-21):Ad Hoc 走生产网关,必须保持 profile 子集 -->
+	<key>aps-environment</key>
+	<string>production</string>
 </dict>
 </plist>

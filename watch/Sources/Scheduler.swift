@@ -109,9 +109,36 @@ final class ExtensionDelegate: NSObject, WKApplicationDelegate {
     func applicationDidFinishLaunching() {
         Scheduler.scheduleNext()   // 前台启动重建链,后台链断掉时的自愈入口
         BackgroundDelivery.shared.start()  // HK 后台投递:数据变化即唤醒(2026-08-20)
+        // APNs 静默心跳(2026-08-21 作者路线):注册拿 token,服务器每 15 分钟
+        // 发一条静默推送免点击拉起跑一轮上传;token 随每次上传带回服务器
+        WKApplication.shared().registerForRemoteNotifications()
         // 本地通知授权(后台撞见指令时提醒佩戴者,点通知直接进 app)
         UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    func didRegisterForRemoteNotifications(withDeviceToken deviceToken: Data) {
+        let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
+        UserDefaults.standard.set(hex, forKey: "apns.token")
+        WatchLog.log("apns token ok")
+    }
+
+    func didFailToRegisterForRemoteNotificationsWithError(_ error: Error) {
+        WatchLog.log("apns token fail \(error.localizedDescription)")
+    }
+
+    // 静默推送唤醒(2026-08-21):系统给 30s 窗口跑 fetch,完成回调绝不能押在
+    // 周期链尾(同 TaskCompleter 思路)——立刻完成,Task 自行跑一轮上传。
+    // 划掉 app 时系统不唤醒(作者实测同款限制),此路不通时守夜模式兜底。
+    func didReceiveRemoteNotification(
+        _ userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (WKBackgroundFetchResult) -> Void
+    ) {
+        WatchLog.log("apns wake received")
+        completionHandler(.newData)
+        Task {
+            await Scheduler.runCycle(foreground: false, skipCommand: true)
+        }
     }
 
     func handle(_ backgroundTasks: Set<WKRefreshBackgroundTask>) {

@@ -39,6 +39,8 @@ final class Uploader: NSObject, URLSessionDataDelegate {
             // 电量感知(2026-08-20):服务端存最新电量,低电量提醒徐聿、断流告警豁免
             "battery": WKInterfaceDevice.current().batteryLevel,
             "night_watch": WorkoutMeasurer.shared.nightWatchOn,
+            // APNs token 随行(2026-08-21):token 轮换自动同步,服务器拿来发静默心跳
+            "apns_token": UserDefaults.standard.string(forKey: "apns.token") ?? "",
         ]
         let data = try JSONSerialization.data(withJSONObject: payload)
         let tmp = FileManager.default.temporaryDirectory
@@ -76,6 +78,8 @@ final class Uploader: NSObject, URLSessionDataDelegate {
             // 电量感知(2026-08-20):同 send()
             "battery": WKInterfaceDevice.current().batteryLevel,
             "night_watch": WorkoutMeasurer.shared.nightWatchOn,
+            // APNs token 随行(2026-08-21):同 send()
+            "apns_token": UserDefaults.standard.string(forKey: "apns.token") ?? "",
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else {
             WatchLog.log("sendSync encode fail")

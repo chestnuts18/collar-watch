@@ -28,6 +28,11 @@
 	<array>
 		<string>workout-processing</string>
 	</array>
+	<!-- APNs 静默心跳(2026-08-21):后台模式加 remote-notification,静默推送可拉起 app -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>WKCompanionAppBundleIdentifier</key>
 	<string>com.chestnuts.collarwatch</string>
 	<key>UIDeviceFamily</key>
