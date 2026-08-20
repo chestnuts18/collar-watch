@@ -1,6 +1,7 @@
 import Foundation
 import HealthKit
 import WatchKit
+import UserNotifications
 
 // workout session 实测。Apple SpeedySloth 标准路线:
 // HKWorkoutSession + HKLiveWorkoutBuilder,短时高频心率采样(每几秒一个),
@@ -108,12 +109,22 @@ final class WorkoutMeasurer: NSObject, ObservableObject,
     // MARK: - 守夜模式（2026-08-20）
     // 长 workout session 换持续后台运行权,绕开 watchOS 26 background delivery 停投。
     // session 期间每 15 分钟主动上传一轮,不依赖系统唤醒预算。
+    // 结束时间 = 下一个 9:00(守夜到点 = 起床时间):到点轻震+本地通知叫醒,
+    // 服务器 Bark 为兜底。低电量 20% 自动退出;手动点停止可随时收工。
     // 睡眠记录走独立 SleepAggregator 不受代码影响;discardWorkout 不写训练记录,
-    // 但"在运动"是否影响系统睡眠判定需实机验证(30min→2h→整夜三段式)。
+    // 但"在运动"是否影响系统睡眠判定需实机验证。
     // watchOS 不允许后台启动 workout session,必须佩戴者睡前手动点一下开关。
-    func startNightWatch(hours: Double = 10) {
+    static let nightWatchWakeHour = 9
+
+    func startNightWatch() {
         guard !measuring, !nightWatchOn else { return }
         nightTearDown = false
+        // 结束时间 = 下一个 9:00(跨零点:23 点开 → 明早 9 点;凌晨 2 点开 → 当天 9 点)
+        var end = Calendar.current.date(
+            bySettingHour: Self.nightWatchWakeHour, minute: 0, second: 0, of: Date())
+            ?? Date().addingTimeInterval(10 * 3600)
+        if end <= Date() { end = end.addingTimeInterval(86400) }
+        nightEnd = end
         let cfg = HKWorkoutConfiguration()
         cfg.activityType = .other
         cfg.locationType = .indoor
@@ -127,14 +138,23 @@ final class WorkoutMeasurer: NSObject, ObservableObject,
             b.delegate = self
             session = s
             builder = b
-            nightEnd = Date().addingTimeInterval(hours * 3600)
             DispatchQueue.main.async {
                 self.nightWatchOn = true
                 self.nightWatchEndAt = self.nightEnd
             }
+            // 本地通知:到点叫醒(app 万一被挂起,通知也能落地)
+            let content = UNMutableNotificationContent()
+            content.title = "徐聿"
+            content.body = "守夜结束，早安～"
+            content.sound = .default
+            let trigger = UNTimeIntervalNotificationTrigger(
+                timeInterval: max(60, end.timeIntervalSinceNow), repeats: false)
+            UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: "nightwatch.end",
+                                      content: content, trigger: trigger))
             s.startActivity(with: Date())
             b.beginCollection(withStart: Date()) { _, _ in }
-            WatchLog.log("night watch start hours=\(hours)")
+            WatchLog.log("night watch start until \(end.formatted(date: .omitted, time: .shortened))")
             Task { await self.nightLoop() }
         } catch {
             Status.shared.note(failure: -1, message: "night watch: \(error.localizedDescription)")
@@ -168,6 +188,11 @@ final class WorkoutMeasurer: NSObject, ObservableObject,
     private func endNightWatch() async {
         guard !nightTearDown else { return }
         nightTearDown = true
+        // 自然到点才叫醒;手动停止(nightEnd 已置 .distantPast)/低电量退出不震
+        if nightEnd != .distantPast && Date() >= nightEnd {
+            WKInterfaceDevice.current().play(.notification)
+            WatchLog.log("night watch wake up")
+        }
         await MainActor.run {
             self.nightWatchOn = false
             self.nightWatchEndAt = nil

@@ -36,6 +36,9 @@ final class Uploader: NSObject, URLSessionDataDelegate {
             // 客户端日志随行(2026-08-19):服务端落盘 data/watch_client_logs.log,
             // 挂起时段发生了什么由下一次成功 POST 带出
             "log": WatchLog.dump(),
+            // 电量感知(2026-08-20):服务端存最新电量,低电量提醒徐聿、断流告警豁免
+            "battery": WKInterfaceDevice.current().batteryLevel,
+            "night_watch": WorkoutMeasurer.shared.nightWatchOn,
         ]
         let data = try JSONSerialization.data(withJSONObject: payload)
         let tmp = FileManager.default.temporaryDirectory
@@ -70,6 +73,9 @@ final class Uploader: NSObject, URLSessionDataDelegate {
             "source": Config.source,
             "samples": samples.map { $0.asJSON(iso: iso) },
             "log": WatchLog.dump(),
+            // 电量感知(2026-08-20):同 send()
+            "battery": WKInterfaceDevice.current().batteryLevel,
+            "night_watch": WorkoutMeasurer.shared.nightWatchOn,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else {
             WatchLog.log("sendSync encode fail")
